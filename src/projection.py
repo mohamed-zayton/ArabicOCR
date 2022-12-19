@@ -42,7 +42,7 @@ def load_image(path):
     return cv2.imdecode(numpyarray, cv2.IMREAD_COLOR)
 
 
-letters_dir = Path("C:\\Users\\PC\\Desktop\\testop\\ConsoleApp4\\ConsoleApp4\\bin\\Debug\\net7.0-windows\\Images")
+letters_dir = Path("./Images")
 letters = [letters_dir.joinpath(letter) for letter in letters_dir.iterdir()]
 letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(load_image(str(letter.absolute())), cv2.COLOR_BGR2GRAY), 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
            for letter in letters]
@@ -52,7 +52,7 @@ letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(load_image(str(letter.
 #     cv2.imwrite(letter.absolute().name, img)
 
 # img = cv2.imread("/home/ramez/PycharmProjects/GradProject/Screenshot_20221212_105958.png", cv2.IMREAD_COLOR)
-img = cv2.imread("C:\\Users\\PC\\Desktop\\ramez\\ArabicOCR\\tifa.png", cv2.IMREAD_COLOR)
+img = cv2.imread("tifa.png", cv2.IMREAD_COLOR)
 gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 (_, binary_img) = cv2.threshold(gray_img, 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 binary_img = cv2.bitwise_not(binary_img)
@@ -69,12 +69,15 @@ binary_img = cv2.bitwise_not(binary_img)
 # plt.plot(y)
 # plt.show()
 
-# d2 = cv2.matchShapes(binary_img, binary_img[:, 350:], cv2.CONTOURS_MATCH_I2, 0)
 # cv2.imshow("lol", binary_img[:][350:])
 # cut = binary_img[:, 384:400]
 # cut = binary_img[:, 312:328]
 # cut = binary_img[:, 350:384]
 # cut = binary_img[:, 328:350]
+cut = binary_img[:, 290:312]
+cv2.imwrite("cut.png", cut)
+for letter, img in letters:
+    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
 
 start = binary_img.shape[1] # The whole width. This is our starting point because Arabic is RTL.
 counter = 0
