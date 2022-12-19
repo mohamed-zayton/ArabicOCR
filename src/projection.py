@@ -38,7 +38,7 @@ def baseline(img):
 
 letters_dir = Path("/home/ramez/PycharmProjects/GradProject/letters")
 letters = [letters_dir.joinpath(letter) for letter in letters_dir.iterdir()]
-letters = [(letter.absolute(), cv2.cvtColor(cv2.imread(str(letter.absolute()), cv2.IMREAD_COLOR), cv2.COLOR_BGR2GRAY))
+letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(cv2.imread(str(letter.absolute()), cv2.IMREAD_COLOR), cv2.COLOR_BGR2GRAY), 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
            for letter in letters]
 # for (letter, img) in letters:
 #     print(letter.name)
@@ -66,10 +66,13 @@ VP = np.sum(binary_img, 0).astype('int32')  # vertical projection
 d2 = cv2.matchShapes(binary_img, binary_img[:, 350:], cv2.CONTOURS_MATCH_I2, 0)
 # cv2.imshow("lol", binary_img[:][350:])
 # cut = binary_img[:, 384:400]
-cut = binary_img[:, 312:328]
+# cut = binary_img[:, 312:328]
+# cut = binary_img[:, 350:384]
+# cut = binary_img[:, 328:350]
+cut = binary_img[:, 290:312]
 cv2.imwrite("cut.png", cut)
 for letter, img in letters:
-    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I3, 0))
+    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
 
 # line_img = cv2.imread("/home/ramez/PycharmProjects/GradProject/Screenshot_20221212_105958.png", cv2.IMREAD_GRAYSCALE)
 # projection_bins = np.sum(line_img, 0).astype('int32')  # vertical projection
