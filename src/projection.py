@@ -43,7 +43,7 @@ def load_image(path):
 
 
 letters_dir = Path("./Images")
-letters = [letters_dir.joinpath(letter) for letter in letters_dir.iterdir()]
+letters = [letter for letter in letters_dir.iterdir()]
 letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(load_image(str(letter.absolute())), cv2.COLOR_BGR2GRAY), 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
            for letter in letters]
 # for (letter, img) in letters:
@@ -74,10 +74,10 @@ binary_img = cv2.bitwise_not(binary_img)
 # cut = binary_img[:, 312:328]
 # cut = binary_img[:, 350:384]
 # cut = binary_img[:, 328:350]
-cut = binary_img[:, 290:312]
-cv2.imwrite("cut.png", cut)
-for letter, img in letters:
-    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
+#cut = binary_img[:, 290:312]
+#cv2.imwrite("cut.png", cut)
+#for letter, img in letters:
+#    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
 
 start = binary_img.shape[1] # The whole width. This is our starting point because Arabic is RTL.
 counter = 0
