@@ -35,10 +35,16 @@ def baseline(img):
     peak = np.amax(HP)
     return np.where(HP == peak)[0][0]
 
+def load_image(path):
+    stream = open(path, "rb")
+    bytes = bytearray(stream.read())
+    numpyarray = np.asarray(bytes, dtype=np.uint8)
+    return cv2.imdecode(numpyarray, cv2.IMREAD_COLOR)
 
-letters_dir = Path("/home/ramez/PycharmProjects/GradProject/letters")
-letters = [letters_dir.joinpath(letter) for letter in letters_dir.iterdir()]
-letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(cv2.imread(str(letter.absolute()), cv2.IMREAD_COLOR), cv2.COLOR_BGR2GRAY), 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
+
+letters_dir = Path("./Images")
+letters = [letter for letter in letters_dir.iterdir()]
+letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(load_image(str(letter.absolute())), cv2.COLOR_BGR2GRAY), 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
            for letter in letters]
 # for (letter, img) in letters:
 #     print(letter.name)
@@ -46,7 +52,7 @@ letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(cv2.imread(str(letter.
 #     cv2.imwrite(letter.absolute().name, img)
 
 # img = cv2.imread("/home/ramez/PycharmProjects/GradProject/Screenshot_20221212_105958.png", cv2.IMREAD_COLOR)
-img = cv2.imread("/home/ramez/PycharmProjects/GradProject/IMG-20221212-WA0012.jpg", cv2.IMREAD_COLOR)
+img = cv2.imread("tifa.png", cv2.IMREAD_COLOR)
 gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 (_, binary_img) = cv2.threshold(gray_img, 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 binary_img = cv2.bitwise_not(binary_img)
@@ -54,25 +60,46 @@ binary_img = cv2.bitwise_not(binary_img)
 # binary_img[baseline_idx: baseline_idx + 10, :] = 0
 # cv2.imwrite("lol.png", binary_img)
 
-baseline_idx = baseline(binary_img)
+# baseline_idx = baseline(binary_img)
 
-VP = np.sum(binary_img, 0).astype('int32')  # vertical projection
+# VP = np.sum(binary_img, 0).astype('int32')  # vertical projection
 
 # y2 = normalized(VP, 0)
 # heights = MAX_PLOT_HEIGHT * y2
 # plt.plot(y)
 # plt.show()
 
-d2 = cv2.matchShapes(binary_img, binary_img[:, 350:], cv2.CONTOURS_MATCH_I2, 0)
 # cv2.imshow("lol", binary_img[:][350:])
 # cut = binary_img[:, 384:400]
 # cut = binary_img[:, 312:328]
 # cut = binary_img[:, 350:384]
 # cut = binary_img[:, 328:350]
-cut = binary_img[:, 290:312]
-cv2.imwrite("cut.png", cut)
-for letter, img in letters:
-    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
+#cut = binary_img[:, 290:312]
+#cv2.imwrite("cut.png", cut)
+#for letter, img in letters:
+#    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
+
+start = binary_img.shape[1] # The whole width. This is our starting point because Arabic is RTL.
+counter = 0
+while True:
+    best_end = start
+    best_distance = 10000000
+    best_cut = None
+    best_letter = ""
+    for i in range(start - 1, -1, -1):
+        cut = binary_img[:, i:start]
+        for letter, img in letters:
+            distance = cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0)
+            if distance < best_distance:
+                best_distance = distance
+                best_cut = cut
+                best_end = i
+                best_letter = letter.name
+
+    cv2.imwrite(f"C:\\Users\\PC\\Desktop\\ramez\\ArabicOCR\\output\\{counter}.png", best_cut)
+    start = best_end
+    counter = counter + 1
+
 
 # line_img = cv2.imread("/home/ramez/PycharmProjects/GradProject/Screenshot_20221212_105958.png", cv2.IMREAD_GRAYSCALE)
 # projection_bins = np.sum(line_img, 0).astype('int32')  # vertical projection
