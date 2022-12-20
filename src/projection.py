@@ -1,10 +1,18 @@
 import cv2
 import numpy as np
 from pathlib import Path
+import shutil
+
+import scipy
 from matplotlib import pyplot as plt
+from skimage.morphology import skeletonize
 from sklearn.preprocessing import normalize
 
-MAX_PLOT_HEIGHT = 100
+
+def cleanup():
+    if Path("./output").exists():
+        shutil.rmtree("./output")
+    Path("./output").mkdir(exist_ok=True)
 
 
 def normalized(a, axis=-1, order=2):
@@ -35,6 +43,7 @@ def baseline(img):
     peak = np.amax(HP)
     return np.where(HP == peak)[0][0]
 
+
 def load_image(path):
     stream = open(path, "rb")
     bytes = bytearray(stream.read())
@@ -42,64 +51,176 @@ def load_image(path):
     return cv2.imdecode(numpyarray, cv2.IMREAD_COLOR)
 
 
-letters_dir = Path("./Images")
-letters = [letter for letter in letters_dir.iterdir()]
-letters = [(letter.absolute(), cv2.threshold(cv2.cvtColor(load_image(str(letter.absolute())), cv2.COLOR_BGR2GRAY), 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1])
-           for letter in letters]
-# for (letter, img) in letters:
-#     print(letter.name)
-#     img = cv2.bitwise_not(img)
-#     cv2.imwrite(letter.absolute().name, img)
+def resize_to_template(img):
+    HP = np.sum(img, 1).astype('int32')
+    HP_no_border = np.where(HP != 0)[0]
+    height = HP_no_border[-1] - HP_no_border[0]
+    # return scipy.misc.imresize(img, 25 / height)
+    return cv2.resize(img, None, fx=30 / height, fy=30 / height, interpolation=cv2.INTER_AREA)
 
-# img = cv2.imread("/home/ramez/PycharmProjects/GradProject/Screenshot_20221212_105958.png", cv2.IMREAD_COLOR)
+
+def split_into_lines(img, empty_rows_above_line=1, empty_rows_below_line=1):
+    projection_bins = np.sum(img, 1).astype('int32')  # horizontal projection
+
+    consecutive_empty_columns = 0
+    current_line_start = -1
+    lines = []
+    for idx, bin_ in enumerate(projection_bins):  # split image when consecutive empty lines are found
+        if bin_ != 0:
+            consecutive_empty_columns = 0
+            if current_line_start == -1:
+                current_line_start = idx
+        elif current_line_start != -1:
+            consecutive_empty_columns += 1
+            if consecutive_empty_columns > empty_rows_below_line:
+                lines.append(img[max(current_line_start - empty_rows_above_line, 0):idx, :])
+                consecutive_empty_columns = 0
+                current_line_start = -1
+    if current_line_start != -1:
+        lines.append(img[max(current_line_start - empty_rows_above_line, 0):, :])
+
+    return lines
+
+
+def split_into_words(img, empty_columns_before_word=1, empty_columns_after_word=1):
+    projection_bins = np.sum(img, 0).astype('int32')  # vertical projection
+
+    consecutive_empty_columns = 0
+    current_word_start = -1
+    words_in_line = []
+    for idx2, bin_ in enumerate(projection_bins):  # split image when consecutive empty lines are found
+        if bin_ != 0:
+            consecutive_empty_columns = 0
+            if current_word_start == -1:
+                current_word_start = idx2
+        elif current_word_start != -1:
+            consecutive_empty_columns += 1
+            if consecutive_empty_columns > empty_columns_after_word:
+                words_in_line.append(img[:, max(current_word_start - empty_columns_before_word, 0):idx2])
+                consecutive_empty_columns = 0
+                current_word_start = -1
+    if current_word_start != -1:
+        words_in_line.append(img[:, max(current_word_start - empty_columns_before_word, 0):])
+
+    return list(reversed(words_in_line))
+
+
+def load_letters(path="./Images"):
+    letters_dir = Path(path)
+    letters = filter(lambda letter: letter.name.endswith(".png"), letters_dir.iterdir())
+    return [(letter.absolute(),
+             cv2.threshold(cv2.cvtColor(load_image(str(letter.absolute())), cv2.COLOR_BGR2GRAY), 100, 255,
+                           cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]) for letter in letters]
+
+
+def get_letter(letters, letter_name):
+    return next(filter(lambda x: x[0].name == f"{letter_name}.png", letters))
+
+
+def detect_template(img, template, hard_thresh=0.7):
+    res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+    loc = np.where(res >= max(hard_thresh, res.max() * 0.95))
+    return list(zip(*loc[::-1]))
+
+
+cleanup()
+letters = load_letters()
+
 img = cv2.imread("tifa.png", cv2.IMREAD_COLOR)
 gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 (_, binary_img) = cv2.threshold(gray_img, 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 binary_img = cv2.bitwise_not(binary_img)
+
+resized_image = resize_to_template(binary_img)
+
+boxes = []
+# for letter, template in [get_letter(letters, letter_name="ـفـ")]:
+for letter, template in letters:
+    w, h = template.shape[::-1]
+    boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+                     detect_template(resized_image, template, hard_thresh=0.85)]
+
+for (x, y, w, h, letter) in boxes:
+    cv2.rectangle(resized_image, (x, y), (x + w, y + h), (255, 255, 255), 1)
+cv2.imwrite('./output/res.png', resized_image)
+
+# import numpy as np
+# import matplotlib.pyplot as plt
+#
+# from skimage.feature import match_template, peak_local_max
+#
+# coin = template
+# result = match_template(resized_image, coin)
+# peaks = peak_local_max(result, min_distance=10, threshold_rel=0.5)
+# ij = np.unravel_index(np.argmax(result), result.shape)
+# x, y = ij[::-1]
+#
+# fig = plt.figure(figsize=(8, 3))
+# ax1 = plt.subplot(1, 3, 1)
+# ax2 = plt.subplot(1, 3, 2)
+# ax3 = plt.subplot(1, 3, 3, sharex=ax2, sharey=ax2)
+#
+# ax1.imshow(coin, cmap=plt.cm.gray)
+# ax1.set_axis_off()
+# ax1.set_title('template')
+#
+# ax2.imshow(resized_image, cmap=plt.cm.gray)
+# ax2.set_axis_off()
+# ax2.set_title('image')
+# # highlight matched region
+# hcoin, wcoin = coin.shape
+# rect = plt.Rectangle((x, y), wcoin, hcoin, edgecolor='r', facecolor='none')
+# ax2.add_patch(rect)
+#
+# ax3.imshow(result)
+# ax3.plot(peaks[:, 1], peaks[:, 0], 'o', markeredgecolor='r', markerfacecolor='none', markersize=10)
+# ax3.set_axis_off()
+# ax3.set_title('`match_template`\nresult')
+# # highlight matched region
+# ax3.autoscale(False)
+# ax3.plot(x, y, 'o', markeredgecolor='r', markerfacecolor='none', markersize=10)
+#
+# plt.show()
 
 # binary_img[baseline_idx: baseline_idx + 10, :] = 0
 # cv2.imwrite("lol.png", binary_img)
 
 # baseline_idx = baseline(binary_img)
 
+# MAX_PLOT_HEIGHT = 100
 # VP = np.sum(binary_img, 0).astype('int32')  # vertical projection
-
-# y2 = normalized(VP, 0)
-# heights = MAX_PLOT_HEIGHT * y2
-# plt.plot(y)
+# heights = VP / np.linalg.norm(VP) * MAX_PLOT_HEIGHT
+# plt.plot(heights)
 # plt.show()
 
 # cv2.imshow("lol", binary_img[:][350:])
-# cut = binary_img[:, 384:400]
+# cut = binary_img[:, 266:]
 # cut = binary_img[:, 312:328]
 # cut = binary_img[:, 350:384]
 # cut = binary_img[:, 328:350]
-#cut = binary_img[:, 290:312]
-#cv2.imwrite("cut.png", cut)
-#for letter, img in letters:
-#    print(str(letter), cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0))
+# cut = binary_img[:, 290:312]
+# cv2.imwrite("cut.png", cut)
+# vals = sorted([(letter, img, cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I1, 0)) for letter, img in letters], key=lambda x: x[2], reverse=False)
 
-start = binary_img.shape[1] # The whole width. This is our starting point because Arabic is RTL.
-counter = 0
-while True:
-    best_end = start
-    best_distance = 10000000
-    best_cut = None
-    best_letter = ""
-    for i in range(start - 1, -1, -1):
-        cut = binary_img[:, i:start]
-        for letter, img in letters:
-            distance = cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0)
-            if distance < best_distance:
-                best_distance = distance
-                best_cut = cut
-                best_end = i
-                best_letter = letter.name
-
-    cv2.imwrite(f"C:\\Users\\PC\\Desktop\\ramez\\ArabicOCR\\output\\{counter}.png", best_cut)
-    start = best_end
-    counter = counter + 1
-
-
-# line_img = cv2.imread("/home/ramez/PycharmProjects/GradProject/Screenshot_20221212_105958.png", cv2.IMREAD_GRAYSCALE)
-# projection_bins = np.sum(line_img, 0).astype('int32')  # vertical projection
+# start = binary_img.shape[1]  # The whole width. This is our starting point because Arabic is RTL.
+# counter = 0
+# THRESH = 1e-4
+# MIN_DISTANCE = 6
+# while True:
+#     best_end = start
+#     best_distance = 10000000
+#     best_cut = None
+#     best_letter = ""
+#     for i in range(start - 1, -1, -1):
+#         cut = binary_img[:, i:start]
+#         for letter, img in letters:
+#             distance = cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I2, 0)
+#             if distance < best_distance and MIN_DISTANCE < start - i:
+#                 best_distance = distance
+#                 best_cut = cut
+#                 best_end = i
+#                 best_letter = letter.name
+#
+#     cv2.imwrite(f"./output/{counter}.png", best_cut)
+#     start = best_end
+#     counter = counter + 1
