@@ -60,7 +60,7 @@ def resize_to_template(img):
     HP_no_border = np.where(HP != 0)[0]
     height = HP_no_border[-1] - HP_no_border[0]
     # return scipy.misc.imresize(img, 25 / height)
-    return cv2.resize(img, None, fx=30 / height, fy=30 / height, interpolation=cv2.INTER_AREA)
+    return cv2.resize(img, None, fx=34 / height, fy=34 / height, interpolation=cv2.INTER_AREA)
 
 
 def split_into_lines(img, empty_rows_above_line=1, empty_rows_below_line=1):
@@ -159,7 +159,7 @@ def bestAlgo(img, letters, hard_thresh=0.70, granularity=0.001):
 cleanup()
 letters = load_letters()
 
-img = cv2.imread("tifa.png", cv2.IMREAD_COLOR)
+img = cv2.imread("Capture.png", cv2.IMREAD_COLOR)
 gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 (_, binary_img) = cv2.threshold(gray_img, 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 binary_img = cv2.bitwise_not(binary_img)
@@ -295,6 +295,7 @@ cv2.imwrite('./output/res.png', resized_image)
 # counter = 0
 # THRESH = 1e-4
 # MIN_DISTANCE = 6
+# out = []
 # for _ in range(15):
 #     best_end = start
 #     best_distance = 10000000
@@ -311,13 +312,17 @@ cv2.imwrite('./output/res.png', resized_image)
 #                 best_letter = letter.name
 #
 #     cv2.imwrite(f"./output/{counter}.png", best_cut)
+#     out.append(best_end)
 #     start = best_end
 #     counter = counter + 1
 # print(time.time() - t)
-
+#
+# for i in out:
+#     cv2.line(binary_img, (i, 0), (i, binary_img.shape[0]), (255, 255, 255))
+# cv2.imwrite(f"./output/res.png", binary_img)
 
 ########################################################################## 4 ##########################################
-# coin = get_letter(letters, "مـ")[1]
+# coin = get_letter(letters, "كـ")[1]
 # result = match_template(resized_image, coin)
 # peaks = peak_local_max(result, min_distance=10, threshold_rel=0.5)
 # ij = np.unravel_index(np.argmax(result), result.shape)
@@ -348,20 +353,27 @@ cv2.imwrite('./output/res.png', resized_image)
 # ax3.autoscale(False)
 # ax3.plot(x, y, 'o', markeredgecolor='r', markerfacecolor='none', markersize=10)
 #
-# plt.savefig('./output/match_shapes.png')
+# plt.savefig('./output/match_template.png')
 
 ########################################################################## 5 ##########################################
 # baseline_idx = baseline(binary_img)
-# binary_img[baseline_idx: baseline_idx + 10, :] = 0
+# binary_img[baseline_idx: baseline_idx + 3, :] = 255
 # cv2.imwrite("./output/img_with_baseline.png", binary_img)
 # MAX_PLOT_HEIGHT = 100
 # VP = np.sum(binary_img, 0).astype('int32')  # vertical projection
 # heights = VP / np.linalg.norm(VP) * MAX_PLOT_HEIGHT
 # plt.plot(heights)
 # plt.savefig('./output/vertical_projection.png')
+# binary_img[baseline_idx: baseline_idx + 10, :] = 0
+# MAX_PLOT_HEIGHT = 100
+# VP = np.sum(binary_img, 0).astype('int32')  # vertical projection
+# heights = VP / np.linalg.norm(VP) * MAX_PLOT_HEIGHT
+# plt.figure()
+# plt.plot(heights)
+# plt.savefig('./output/vertical_projection_with_baseline_removed.png')
 
 ########################################################################## 6 ##########################################
-# cut = binary_img[:, 1600:]
+# cut = binary_img[:, 877:907]
 # cv2.imwrite("./output/cut.png", cut)
 # vals = sorted([(letter, img, cv2.matchShapes(cut, img, cv2.CONTOURS_MATCH_I1, 0)) for letter, img in letters], key=lambda x: x[2], reverse=False)
 # for (letter, img, score) in vals:
