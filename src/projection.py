@@ -64,7 +64,7 @@ def resize_to_template(img):
     HP = np.sum(remove_dots(img, img.shape[0] / 1.3), 1).astype('int32')
     HP_no_border = np.where(HP != 0)[0]
     height = HP_no_border[-1] - HP_no_border[0]
-    return cv2.resize(img, None, fx=30 / height, fy=30 / height, interpolation=cv2.INTER_AREA)
+    return cv2.resize(img, None, fx=33 / height, fy=33 / height, interpolation=cv2.INTER_AREA)
 
 
 def get_binarized_image(name):
