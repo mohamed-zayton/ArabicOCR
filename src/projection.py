@@ -1,4 +1,6 @@
 import difflib
+import multiprocessing
+import os
 import time
 
 import cv2
@@ -59,7 +61,7 @@ def load_image(path):
 
 
 def resize_to_template(img):
-    HP = np.sum(remove_dots(img, img.shape[1] / 2), 1).astype('int32')
+    HP = np.sum(remove_dots(img, img.shape[0] / 1.3), 1).astype('int32')
     HP_no_border = np.where(HP != 0)[0]
     height = HP_no_border[-1] - HP_no_border[0]
     return cv2.resize(img, None, fx=30 / height, fy=30 / height, interpolation=cv2.INTER_AREA)
@@ -129,6 +131,11 @@ def load_letters(path="./Images"):
 
 def get_letter(letters, letter_name):
     return next(filter(lambda x: x[0].name == f"{letter_name}.png", letters))
+
+
+def read_file_lines(filename):
+    with open(filename) as file:
+        return [line.rstrip() for line in file]
 
 
 def detect_template(img, template, hard_thresh=0.7):
@@ -211,14 +218,17 @@ resized_image = resize_to_template(binary_img)
 #     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (255, 255, 255))
 # cv2.imwrite('./output/res.png', resized_image)
 
-########################################################################## 0.1 ##########################################
-lines = [(resize_to_template(split_into_lines(get_binarized_image("Capture.png"))[0]), "أبجد هوز حطي كلمن سعفص قرشت ثخذ ضظغ")]
-distances = []
-for k, (line, ground_truth) in tqdm(enumerate(lines), desc="lines", leave=True):
+########################################################################## 0.2 ##########################################
+lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/0.png"))),
+            read_file_lines("./data/0.txt")))
+
+
+def run(param):
+    k, (line, ground_truth) = param
     line = np.pad(line, 20)
     words = split_into_words(line)
     word_predictions = []
-    for i, word in enumerate(tqdm(words, desc="words", leave=False)):
+    for i, word in enumerate(words):
         word = np.pad(word, (20, 20))
         out = bestAlgo(word, letters)
         for j, (x, y, w, h, letter) in enumerate(sorted(out, key=lambda box: box[0], reverse=True)):
@@ -233,13 +243,16 @@ for k, (line, ground_truth) in tqdm(enumerate(lines), desc="lines", leave=True):
 
     prediction = " ".join(word_predictions)
     distance = levenshtein_distance(prediction, ground_truth)
-    # diff = diff_strings(prediction, ground_truth)
-    # print("Ground truth: ", ground_truth.ljust(diff[1] - 2))
-    # print("Prediction: ", diff[0])
-    # print("Distance: ", distance)
-    distances.append((distance, len(ground_truth)))
+    return distance / len(ground_truth)
 
-print("Average distance per letter", sum([x / y for x, y in distances]) / len(distances))
+
+pool = multiprocessing.Pool(os.cpu_count() * 4)
+res = pool.imap_unordered(run, enumerate(lines))
+distances = []
+for x in tqdm(res, total=len(lines)):
+    distances.append(x)
+
+print("Average distance per letter", sum(distances) / len(distances))
 
 ########################################################################## 1 ##########################################
 # letter_counter = 0
