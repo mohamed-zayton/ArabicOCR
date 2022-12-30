@@ -9,3 +9,5 @@ Pillow~=9.3.0
 scikit-image~=0.19.3
 Levenshtein~=0.20.8
 tqdm~=4.64.1
+pybind11
+fastwer

@@ -2,6 +2,7 @@ import difflib
 import multiprocessing
 import os
 import time
+from functools import reduce
 
 import cv2
 import numpy as np
@@ -10,6 +11,7 @@ import shutil
 import copy
 
 import scipy
+import fastwer
 from matplotlib import pyplot as plt
 from skimage.morphology import skeletonize
 from sklearn.preprocessing import normalize
@@ -60,11 +62,11 @@ def load_image(path):
     return cv2.imdecode(numpyarray, cv2.IMREAD_COLOR)
 
 
-def resize_to_template(img):
+def resize_to_template(img, template_height = 30):
     HP = np.sum(remove_dots(img, img.shape[0] / 1.3), 1).astype('int32')
     HP_no_border = np.where(HP != 0)[0]
     height = HP_no_border[-1] - HP_no_border[0]
-    return cv2.resize(img, None, fx=33 / height, fy=33 / height, interpolation=cv2.INTER_AREA)
+    return cv2.resize(img, None, fx=template_height / height, fy=template_height / height, interpolation=cv2.INTER_AREA)
 
 
 def get_binarized_image(name):
@@ -183,10 +185,11 @@ def bestAlgo(img, letters, hard_thresh=0.70, granularity=0.001):
         best_score = -1
         for letter, template in letters:
             res = cv2.matchTemplate(cpy, template, cv2.TM_CCOEFF_NORMED)
-            if res.max() >= best_score and res.max() >= thresh:
-                loc = np.where(res >= res.max())
+            max_ = res.max()
+            if max_ >= best_score and max_ >= thresh:
+                loc = np.where(res >= max_)
                 pt = next(zip(*loc[::-1]))
-                best_score = res.max()
+                best_score = max_
                 w_, h_ = template.shape[::-1]
                 (x, y, w, h, l) = (pt[0], pt[1], w_, h_, letter)
 
@@ -206,7 +209,7 @@ img = cv2.imread("Capture.png", cv2.IMREAD_COLOR)
 gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 (_, binary_img) = cv2.threshold(gray_img, 100, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 binary_img = cv2.bitwise_not(binary_img)
-resized_image = resize_to_template(binary_img)
+resized_image = resize_to_template(binary_img, 34)
 
 ########################################################################## 0 ##########################################
 # out = bestAlgo(resized_image, letters)
@@ -219,40 +222,54 @@ resized_image = resize_to_template(binary_img)
 # cv2.imwrite('./output/res.png', resized_image)
 
 ########################################################################## 0.2 ##########################################
-lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/0.png"))),
-            read_file_lines("./data/0.txt")))
+lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/7.png"))),
+            read_file_lines("./data/7.txt")))
 
+lines = lines + list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/8.png"))),
+            read_file_lines("./data/8.txt")))
 
-def run(param):
+# lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./Capture.png"))),
+#             ["أبجد هوز حطي كلمن سعفص قرشت ثخذ ضهلع"]))
+
+def run(param, padding = 20):
     k, (line, ground_truth) = param
-    line = np.pad(line, 20)
+    line = np.pad(line, padding)
     words = split_into_words(line)
     word_predictions = []
+    annotated_words = []
     for i, word in enumerate(words):
         word = np.pad(word, (20, 20))
-        out = bestAlgo(word, letters)
+        out = bestAlgo(word, letters, granularity=0.006)
         for j, (x, y, w, h, letter) in enumerate(sorted(out, key=lambda box: box[0], reverse=True)):
             cv2.imwrite(f"./output/line_{k}_word_{i}_letter_{j}.png", word[y:y + h, x:x + w])
 
         word_predictions.append("".join([letter.name.replace("ـ", "").replace(".png", "") for (x, y, w, h, letter) in
                                          sorted(out, key=lambda box: box[0], reverse=True)]))
-        cpy = copy.deepcopy(word)
+        word_cpy = copy.deepcopy(word)
         for (x, y, w, h, letter) in out:
-            cv2.rectangle(cpy, (x, y), (x + w, y + h), (255, 255, 255))
-        cv2.imwrite(f"./output/line_{k}_word_{i}.png", cpy)
+            cv2.rectangle(word_cpy, (x, y), (x + w, y + h), (255, 255, 255))
+        annotated_words.append(word_cpy[padding:-padding, padding:-padding])
+        cv2.imwrite(f"./output/line_{k}_word_{i}.png", word_cpy)
 
+    annotated_line = reduce(lambda x,y: np.concatenate((x,y), axis=1), reversed(annotated_words))
+    cv2.imwrite(f"./output/line_{k}.png", annotated_line)
     prediction = " ".join(word_predictions)
-    distance = levenshtein_distance(prediction, ground_truth)
-    return distance / len(ground_truth)
+    cer = fastwer.score_sent(prediction, ground_truth, char_level=True)
+    wer = fastwer.score_sent(prediction, ground_truth, char_level=False)
+    return cer, wer
 
 
-pool = multiprocessing.Pool(os.cpu_count() * 4)
+pool = multiprocessing.Pool(os.cpu_count())
 res = pool.imap_unordered(run, enumerate(lines))
-distances = []
+cers = []
+wers = []
 for x in tqdm(res, total=len(lines)):
-    distances.append(x)
+    cers.append(x[0])
+    wers.append(x[1])
 
-print("Average distance per letter", sum(distances) / len(distances))
+print(f"CER: {np.mean(cers)}%")
+print(f"WER: {np.mean(wers)}%")
+print("Total characters: ", sum([len(i) for _, i in lines]))
 
 ########################################################################## 1 ##########################################
 # letter_counter = 0
@@ -270,11 +287,13 @@ print("Average distance per letter", sum(distances) / len(distances))
 # letter_counter = 0
 # boxes = []
 #
-# # for letter, template in [get_letter(letters, letter_name="ـفـ")]:
+# cv2.imwrite('./output/res.png', resized_image)
+#
+# for letter, template in [get_letter(letters, letter_name="ـفـ")]:
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.91)]
+#                      detect_template(resized_image, template, hard_thresh=0.97)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + w])
@@ -285,7 +304,7 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.89)]
+#                      detect_template(resized_image, template, hard_thresh=0.96)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
@@ -296,7 +315,7 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.88)]
+#                      detect_template(resized_image, template, hard_thresh=0.95)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
@@ -307,7 +326,7 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.87)]
+#                      detect_template(resized_image, template, hard_thresh=0.94)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
@@ -318,7 +337,7 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.86)]
+#                      detect_template(resized_image, template, hard_thresh=0.93)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
@@ -329,7 +348,7 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.85)]
+#                      detect_template(resized_image, template, hard_thresh=0.92)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
@@ -340,7 +359,7 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.83)]
+#                      detect_template(resized_image, template, hard_thresh=0.91)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
@@ -351,14 +370,79 @@ print("Average distance per letter", sum(distances) / len(distances))
 # for letter, template in letters:
 #     w, h = template.shape[::-1]
 #     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
-#                      detect_template(resized_image, template, hard_thresh=0.76)]
+#                      detect_template(resized_image, template, hard_thresh=0.89)]
 #
 # for (x, y, w, h, letter) in boxes:
 #     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
 #     letter_counter += 1
 #     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
 # cv2.imwrite('./output/res7.png', resized_image)
-
+#
+# for letter, template in letters:
+#     w, h = template.shape[::-1]
+#     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+#                      detect_template(resized_image, template, hard_thresh=0.88)]
+#
+# for (x, y, w, h, letter) in boxes:
+#     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
+#     letter_counter += 1
+#     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
+# cv2.imwrite('./output/res8.png', resized_image)
+#
+# for letter, template in letters:
+#     w, h = template.shape[::-1]
+#     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+#                      detect_template(resized_image, template, hard_thresh=0.87)]
+#
+# for (x, y, w, h, letter) in boxes:
+#     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
+#     letter_counter += 1
+#     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
+# cv2.imwrite('./output/res9.png', resized_image)
+#
+# for letter, template in letters:
+#     w, h = template.shape[::-1]
+#     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+#                      detect_template(resized_image, template, hard_thresh=0.85)]
+#
+# for (x, y, w, h, letter) in boxes:
+#     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
+#     letter_counter += 1
+#     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
+# cv2.imwrite('./output/res10.png', resized_image)
+#
+# for letter, template in letters:
+#     w, h = template.shape[::-1]
+#     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+#                      detect_template(resized_image, template, hard_thresh=0.83)]
+#
+# for (x, y, w, h, letter) in boxes:
+#     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
+#     letter_counter += 1
+#     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
+# cv2.imwrite('./output/res11.png', resized_image)
+#
+# for letter, template in letters:
+#     w, h = template.shape[::-1]
+#     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+#                      detect_template(resized_image, template, hard_thresh=0.82)]
+#
+# for (x, y, w, h, letter) in boxes:
+#     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
+#     letter_counter += 1
+#     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
+# cv2.imwrite('./output/res12.png', resized_image)
+#
+# for letter, template in letters:
+#     w, h = template.shape[::-1]
+#     boxes = boxes + [(box[0], box[1], w, h, letter) for box in
+#                      detect_template(resized_image, template, hard_thresh=0.77)]
+#
+# for (x, y, w, h, letter) in boxes:
+#     cv2.imwrite(f"./output/letter_{letter_counter}.png", resized_image[y:y + h, x:x + h])
+#     letter_counter += 1
+#     cv2.rectangle(resized_image, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
+# cv2.imwrite('./output/res13.png', resized_image)
 
 ########################################################################## 2.1 ##########################################
 # boxes = []
@@ -438,6 +522,30 @@ print("Average distance per letter", sum(distances) / len(distances))
 # ax3.plot(x, y, 'o', markeredgecolor='r', markerfacecolor='none', markersize=10)
 #
 # plt.savefig('./output/match_template.png')
+
+########################################################################## 5.0 ##########################################
+# whole_img = get_binarized_image("./data/0.png")
+# projection_bins = np.sum(whole_img, 1).astype('int32')  # horizontal projection
+# x = [i for i in range(len(projection_bins))]
+# plt.figure(figsize=(12, 12), dpi=200)
+# plt.plot(projection_bins[::-1], x)
+# plt.savefig("./output/hp.png")
+#
+# line = split_into_lines(get_binarized_image("./Capture.png"))[0]
+# words = split_into_words(line, empty_columns_after_word=5)
+# word = words[4]
+# cv2.imwrite("./output/whole_img.png", whole_img)
+# cv2.imwrite("./output/word.png", word)
+# cv2.imwrite("./output/line.png", line)
+#
+# plt.figure(figsize=(20, 8), dpi=200)
+# projection_bins = np.sum(line, 0).astype('int32')  # vertical projection
+# plt.plot(projection_bins)
+# plt.savefig("./output/vp_line.png")
+# plt.figure(figsize=(20, 8), dpi=200)
+# projection_bins = np.sum(word, 0).astype('int32')  # vertical projection
+# plt.plot(projection_bins)
+# plt.savefig("./output/vp_word.png")
 
 ########################################################################## 5 ##########################################
 # baseline_idx = baseline(binary_img)
