@@ -18,6 +18,7 @@ from sklearn.preprocessing import normalize
 from skimage.feature import match_template, peak_local_max
 from Levenshtein import distance as levenshtein_distance
 from tqdm.auto import tqdm
+from scipy.signal import fftconvolve, convolve2d
 
 
 def cleanup():
@@ -173,28 +174,44 @@ def diff_strings(a, b):
     return ''.join(output), width
 
 
-def bestAlgo(img, letters, hard_thresh=0.70, granularity=0.001):
+def normxcorr2(template, image):
+    # If this happens, it is probably a mistake
+    if np.ndim(template) > np.ndim(image) or \
+            len([i for i in range(np.ndim(template)) if template.shape[i] > image.shape[i]]) > 0:
+        print("normxcorr2: TEMPLATE larger than IMG. Arguments may be swapped.")
+
+    template = template - np.mean(template)
+    image = image - np.mean(image)
+
+    a1 = np.ones(template.shape)
+    out = convolve2d(image, np.flipud(np.fliplr(template)))
+
+    # normalization
+    image = convolve2d(np.square(image), a1) - np.square(convolve2d(image, a1)) / (np.prod(template.shape))
+    image[np.where(image < 0)] = 0 # Remove small machine precision errors after subtraction
+    out = out / np.sqrt(image * np.sum(np.square(template)))
+    out[np.where(np.logical_not(np.isfinite(out)))] = 0 # Remove any divisions by 0 or very close to 0
+
+    return out
+
+
+def bestAlgo(img, letters, hard_thresh=0.70):
     cpy = copy.deepcopy(img)
     out = []
-    thresh = 0.998
     while True:
-        if thresh < hard_thresh:
-            break
-
-        (x, y, w, h, l) = None, None, None, None, None
         best_score = -1
         for letter, template in letters:
             res = cv2.matchTemplate(cpy, template, cv2.TM_CCOEFF_NORMED)
             max_ = res.max()
-            if max_ >= best_score and max_ >= thresh:
+            if max_ >= best_score and max_ >= hard_thresh:
                 loc = np.where(res >= max_)
                 pt = next(zip(*loc[::-1]))
                 best_score = max_
                 w_, h_ = template.shape[::-1]
                 (x, y, w, h, l) = (pt[0], pt[1], w_, h_, letter)
 
-        if best_score == -1:
-            thresh -= granularity
+        if best_score < hard_thresh:
+            break
         else:
             out.append((x, y, w, h, l))
             cv2.rectangle(cpy, (x, y), (x + w, y + h), (0, 0, 0), cv2.FILLED)
@@ -222,14 +239,14 @@ resized_image = resize_to_template(binary_img, 34)
 # cv2.imwrite('./output/res.png', resized_image)
 
 ########################################################################## 0.2 ##########################################
-lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/7.png"))),
-            read_file_lines("./data/7.txt")))
+# lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/7.png"))),
+#             read_file_lines("./data/7.txt")))
+#
+# lines = lines + list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/8.png"))),
+#             read_file_lines("./data/8.txt")))
 
-lines = lines + list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./data/8.png"))),
-            read_file_lines("./data/8.txt")))
-
-# lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./Capture.png"))),
-#             ["أبجد هوز حطي كلمن سعفص قرشت ثخذ ضهلع"]))
+lines = list(zip(map(resize_to_template, split_into_lines(get_binarized_image("./Capture.png"))),
+            ["أبجد هوز حطي كلمن سعفص قرشت ثخذ ضهلع"]))
 
 def run(param, padding = 20):
     k, (line, ground_truth) = param
@@ -239,7 +256,7 @@ def run(param, padding = 20):
     annotated_words = []
     for i, word in enumerate(words):
         word = np.pad(word, (20, 20))
-        out = bestAlgo(word, letters, granularity=0.006)
+        out = bestAlgo(word, letters)
         for j, (x, y, w, h, letter) in enumerate(sorted(out, key=lambda box: box[0], reverse=True)):
             cv2.imwrite(f"./output/line_{k}_word_{i}_letter_{j}.png", word[y:y + h, x:x + w])
 
@@ -490,58 +507,122 @@ print("Total characters: ", sum([len(i) for _, i in lines]))
 # cv2.imwrite(f"./output/res.png", binary_img)
 
 ########################################################################## 4 ##########################################
-# coin = get_letter(letters, "كـ")[1]
-# result = match_template(resized_image, coin)
-# peaks = peak_local_max(result, min_distance=10, threshold_rel=0.5)
-# ij = np.unravel_index(np.argmax(result), result.shape)
-# x, y = ij[::-1]
+# template = get_letter(letters, "كـ")[1]
+# cv2.imwrite("./output/template.png", template)
+# cv2.imwrite("./output/image.png", binary_img)
+# result = normxcorr2(template, resized_image)
+# y,x = np.unravel_index(result.argmax(), result.shape)
 #
 # fig = plt.figure(figsize=(8, 3))
 # ax1 = plt.subplot(1, 3, 1)
 # ax2 = plt.subplot(1, 3, 2)
 # ax3 = plt.subplot(1, 3, 3, sharex=ax2, sharey=ax2)
 #
-# ax1.imshow(coin, cmap=plt.cm.gray)
+# ax1.imshow(template, cmap=plt.cm.gray)
 # ax1.set_axis_off()
 # ax1.set_title('template')
 #
 # ax2.imshow(resized_image, cmap=plt.cm.gray)
 # ax2.set_axis_off()
 # ax2.set_title('image')
-# # highlight matched region
-# hcoin, wcoin = coin.shape
-# rect = plt.Rectangle((x, y), wcoin, hcoin, edgecolor='r', facecolor='none')
+# rect = plt.Rectangle((x - template.shape[1], y - template.shape[0]), template.shape[1], template.shape[0], edgecolor='r', facecolor='none')
 # ax2.add_patch(rect)
 #
-# ax3.imshow(result)
-# ax3.plot(peaks[:, 1], peaks[:, 0], 'o', markeredgecolor='r', markerfacecolor='none', markersize=10)
+# ax3.imshow(normxcorr2(template, resized_image))
 # ax3.set_axis_off()
-# ax3.set_title('`match_template`\nresult')
-# # highlight matched region
-# ax3.autoscale(False)
-# ax3.plot(x, y, 'o', markeredgecolor='r', markerfacecolor='none', markersize=10)
+# ax3.set_title('Cross Correlation')
+# ax3.plot(x, y, 'o', markeredgecolor='r', markerfacecolor='none', markersize=5)
 #
 # plt.savefig('./output/match_template.png')
 
 ########################################################################## 5.0 ##########################################
 # whole_img = get_binarized_image("./data/0.png")
+# whole_img = whole_img[45:110, :]
+#
+#
+# cv2.imwrite("./output/whole_img.png", whole_img)
+#
+# def get_line_cuts(img, empty_rows_above_line=1, empty_rows_below_line=1):
+#     projection_bins = np.sum(img, 1).astype('int32')  # horizontal projection
+#
+#     consecutive_empty_columns = 0
+#     current_line_start = -1
+#     lines = []
+#     for idx, bin_ in enumerate(projection_bins):  # split image when consecutive empty lines are found
+#         if bin_ != 0:
+#             consecutive_empty_columns = 0
+#             if current_line_start == -1:
+#                 current_line_start = idx
+#         elif current_line_start != -1:
+#             consecutive_empty_columns += 1
+#             if consecutive_empty_columns > empty_rows_below_line:
+#                 lines.append((max(current_line_start - empty_rows_above_line, 0), idx))
+#                 consecutive_empty_columns = 0
+#                 current_line_start = -1
+#     if current_line_start != -1:
+#         lines.append((max(current_line_start - empty_rows_above_line, 0), img.shape[0]))
+#
+#     return lines
+#
 # projection_bins = np.sum(whole_img, 1).astype('int32')  # horizontal projection
 # x = [i for i in range(len(projection_bins))]
 # plt.figure(figsize=(12, 12), dpi=200)
 # plt.plot(projection_bins[::-1], x)
 # plt.savefig("./output/hp.png")
 #
+# cuts = get_line_cuts(whole_img)
+# for x1, x2 in cuts:
+#     cv2.line(whole_img, (0, x1), (whole_img.shape[1], x1), (255, 255, 255))
+#     cv2.line(whole_img, (0, x2), (whole_img.shape[1], x2), (255, 255, 255))
+#     plt.axhline(y=x1, color='r', linestyle='-')
+#     plt.axhline(y=x2, color='r', linestyle='-')
+#
+# plt.savefig("./output/hp_with_cuts.png")
+# cv2.imwrite("./output/whole_img_with_cuts.png", whole_img)
+#
 # line = split_into_lines(get_binarized_image("./Capture.png"))[0]
-# words = split_into_words(line, empty_columns_after_word=5)
-# word = words[4]
-# cv2.imwrite("./output/whole_img.png", whole_img)
-# cv2.imwrite("./output/word.png", word)
 # cv2.imwrite("./output/line.png", line)
+# words = split_into_words(line, empty_columns_after_word=5)
+# word = copy.deepcopy(words[4])
+# cv2.imwrite("./output/word.png", word)
+#
+# def get_word_cuts(img, empty_columns_before_word=2, empty_columns_after_word=2):
+#     projection_bins = np.sum(img, 0).astype('int32')  # vertical projection
+#
+#     consecutive_empty_columns = 0
+#     current_word_start = -1
+#     words_in_line = []
+#     for idx2, bin_ in enumerate(projection_bins):  # split image when consecutive empty lines are found
+#         if bin_ != 0:
+#             consecutive_empty_columns = 0
+#             if current_word_start == -1:
+#                 current_word_start = idx2
+#         elif current_word_start != -1:
+#             consecutive_empty_columns += 1
+#             if consecutive_empty_columns > empty_columns_after_word:
+#                 words_in_line.append((max(current_word_start - empty_columns_before_word, 0), idx2))
+#                 consecutive_empty_columns = 0
+#                 current_word_start = -1
+#     if current_word_start != -1:
+#         words_in_line.append((max(current_word_start - empty_columns_before_word, 0), img.shape[1]))
+#
+#     return list(reversed(words_in_line))
 #
 # plt.figure(figsize=(20, 8), dpi=200)
 # projection_bins = np.sum(line, 0).astype('int32')  # vertical projection
 # plt.plot(projection_bins)
 # plt.savefig("./output/vp_line.png")
+#
+# cuts = get_word_cuts(line)
+# for x1, x2 in cuts:
+#     cv2.line(line, (x1, 0), (x1, whole_img.shape[1]), (255, 255, 255))
+#     cv2.line(line, (x2, 0), (x2, whole_img.shape[1]), (255, 255, 255))
+#     plt.axvline(x=x1, color='r', linestyle='-')
+#     plt.axvline(x=x2, color='r', linestyle='-')
+#
+# cv2.imwrite("./output/line_with_cuts.png", line)
+# plt.savefig("./output/vp_line_with_cuts.png")
+#
 # plt.figure(figsize=(20, 8), dpi=200)
 # projection_bins = np.sum(word, 0).astype('int32')  # vertical projection
 # plt.plot(projection_bins)
