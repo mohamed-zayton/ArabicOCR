@@ -1,4 +1,0 @@
-deskew
-opencv-python
-requests
-numpy
